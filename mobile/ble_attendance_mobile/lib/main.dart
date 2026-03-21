@@ -124,9 +124,9 @@ class _LoginPageState extends State<LoginPage> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_friendlyError(error))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_friendlyError(error))));
     } finally {
       if (mounted) {
         setState(() {
@@ -153,9 +153,9 @@ class _LoginPageState extends State<LoginPage> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_friendlyError(error))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_friendlyError(error))));
     } finally {
       if (mounted) {
         setState(() {
@@ -197,7 +197,9 @@ class _LoginPageState extends State<LoginPage> {
               controller: _identifierCtrl,
               textCapitalization: TextCapitalization.characters,
               decoration: InputDecoration(
-                labelText: _role == AppRole.teacher ? 'Teacher ID (e.g. T001)' : 'Student ID (e.g. 25CE099)',
+                labelText: _role == AppRole.teacher
+                    ? 'Teacher ID (e.g. T001)'
+                    : 'Student ID (e.g. 25CE099)',
               ),
             ),
             const SizedBox(height: 12),
@@ -220,7 +222,11 @@ class _LoginPageState extends State<LoginPage> {
             const SizedBox(height: 16),
             FilledButton(
               onPressed: _loading || !_ready ? null : _submit,
-              child: Text(_loading ? 'Please wait...' : (_isRegister ? 'Register and Login' : 'Login')),
+              child: Text(
+                _loading
+                    ? 'Please wait...'
+                    : (_isRegister ? 'Register and Login' : 'Login'),
+              ),
             ),
             OutlinedButton(
               onPressed: _loading || !_ready ? null : _testConnection,
@@ -234,7 +240,11 @@ class _LoginPageState extends State<LoginPage> {
                         _isRegister = !_isRegister;
                       });
                     },
-              child: Text(_isRegister ? 'Already have account? Login' : 'New user? Register'),
+              child: Text(
+                _isRegister
+                    ? 'Already have account? Login'
+                    : 'New user? Register',
+              ),
             ),
             const SizedBox(height: 8),
             const Text('Prototype tip: keep app open during class on iOS.'),
@@ -310,7 +320,9 @@ class _TeacherPageState extends State<TeacherPage> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_friendlyError(error))));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_friendlyError(error))));
     } finally {
       if (mounted) {
         setState(() {
@@ -355,7 +367,9 @@ class _TeacherPageState extends State<TeacherPage> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_friendlyError(error))));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_friendlyError(error))));
     } finally {
       if (mounted) {
         setState(() {
@@ -432,7 +446,9 @@ class _TeacherPageState extends State<TeacherPage> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_friendlyError(error))));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_friendlyError(error))));
     } finally {
       if (mounted) {
         setState(() {
@@ -467,7 +483,9 @@ class _TeacherPageState extends State<TeacherPage> {
             ),
             const SizedBox(height: 8),
             FilledButton.tonal(
-              onPressed: _loading || _sessionId == null || _finalizationOpen ? null : _openFinalization,
+              onPressed: _loading || _sessionId == null || _finalizationOpen
+                  ? null
+                  : _openFinalization,
               child: const Text('Open Finalization for Students'),
             ),
             const SizedBox(height: 8),
@@ -510,11 +528,19 @@ class _TeacherPageState extends State<TeacherPage> {
                 itemBuilder: (context, index) {
                   final row = _detections[index];
                   return ListTile(
-                    title: Text('${row['student_id']} (${row['student_name']})'),
-                    subtitle: Text('RSSI: ${row['rssi']} | ${row['detected_at']}'),
+                    title: Text(
+                      '${row['student_id']} (${row['student_name']})',
+                    ),
+                    subtitle: Text(
+                      'RSSI: ${row['rssi']} | ${row['detected_at']}',
+                    ),
                     trailing: Icon(
-                      (row['proximity_ok'] as bool?) == true ? Icons.check_circle : Icons.cancel,
-                      color: (row['proximity_ok'] as bool?) == true ? Colors.green : Colors.red,
+                      (row['proximity_ok'] as bool?) == true
+                          ? Icons.check_circle
+                          : Icons.cancel,
+                      color: (row['proximity_ok'] as bool?) == true
+                          ? Colors.green
+                          : Colors.red,
                     ),
                   );
                 },
@@ -547,6 +573,8 @@ class _StudentPageState extends State<StudentPage> {
   bool _scanning = false;
   bool _finalizationOpen = false;
   bool _blePermissionsGranted = true;
+  String? _scanError;
+  Timer? _scanRetryTimer;
   DateTime _lastSentAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   @override
@@ -558,6 +586,7 @@ class _StudentPageState extends State<StudentPage> {
   @override
   void dispose() {
     _scanSub?.cancel();
+    _scanRetryTimer?.cancel();
     super.dispose();
   }
 
@@ -567,9 +596,12 @@ class _StudentPageState extends State<StudentPage> {
       if (mounted) {
         setState(() {
           _blePermissionsGranted = false;
+          _scanError = 'Nearby devices permission denied.';
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Bluetooth permissions are required for scanning.')),
+          const SnackBar(
+            content: Text('Bluetooth permissions are required for scanning.'),
+          ),
         );
       }
       return;
@@ -602,48 +634,72 @@ class _StudentPageState extends State<StudentPage> {
     if (_scanning) {
       return;
     }
+    _scanRetryTimer?.cancel();
+    await _scanSub?.cancel();
     setState(() {
       _scanning = true;
+      _scanError = null;
     });
 
     _scanSub = _ble
-        .scanForDevices(
-          withServices: const [],
-          scanMode: ScanMode.lowLatency,
-        )
-        .listen((device) async {
-          final sessionId = _sessionId;
-          if (sessionId == null) {
-            return;
-          }
+        .scanForDevices(withServices: const [], scanMode: ScanMode.lowLatency)
+        .listen(
+          (device) async {
+            final sessionId = _sessionId;
+            if (sessionId == null) {
+              return;
+            }
 
-          final rssi = device.rssi;
-          final ok = rssi > kRssiThreshold;
-          setState(() {
-            _latestRssi = rssi;
-            _proximityOk = ok;
-          });
-
-          final now = DateTime.now();
-          if (now.difference(_lastSentAt) < kDetectionPostInterval) {
-            return;
-          }
-
-          try {
-            await widget.api.submitDetection(
-              sessionId: sessionId,
-              rssi: rssi,
-              proximityOk: ok,
-            );
-            _lastSentAt = now;
-          } catch (_) {}
-        }, onError: (_) {
-          if (mounted) {
+            final rssi = device.rssi;
+            final ok = rssi > kRssiThreshold;
             setState(() {
-              _scanning = false;
+              _latestRssi = rssi;
+              _proximityOk = ok;
             });
-          }
-        });
+
+            final now = DateTime.now();
+            if (now.difference(_lastSentAt) < kDetectionPostInterval) {
+              return;
+            }
+
+            try {
+              await widget.api.submitDetection(
+                sessionId: sessionId,
+                rssi: rssi,
+                proximityOk: ok,
+              );
+              _lastSentAt = now;
+            } catch (_) {}
+          },
+          onError: (error) {
+            if (mounted) {
+              setState(() {
+                _scanning = false;
+                _scanError = 'Scan stopped. Retrying...';
+              });
+              _scheduleScanRetry();
+            }
+          },
+          onDone: () {
+            if (mounted) {
+              setState(() {
+                _scanning = false;
+                _scanError = 'Scan ended. Retrying...';
+              });
+              _scheduleScanRetry();
+            }
+          },
+        );
+  }
+
+  void _scheduleScanRetry() {
+    _scanRetryTimer?.cancel();
+    _scanRetryTimer = Timer(const Duration(seconds: 2), () async {
+      if (!mounted || !_blePermissionsGranted || _scanning) {
+        return;
+      }
+      await _startScan();
+    });
   }
 
   Future<void> _finalizeWithBiometric() async {
@@ -653,15 +709,21 @@ class _StudentPageState extends State<StudentPage> {
     }
     if (!_finalizationOpen) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Teacher has not opened finalization yet.')),
+        const SnackBar(
+          content: Text('Teacher has not opened finalization yet.'),
+        ),
       );
       return;
     }
 
     try {
-      final canAuth = await _localAuth.canCheckBiometrics || await _localAuth.isDeviceSupported();
+      final canAuth =
+          await _localAuth.canCheckBiometrics ||
+          await _localAuth.isDeviceSupported();
       if (!canAuth) {
-        throw Exception('Biometric/passcode auth is not available on this device.');
+        throw Exception(
+          'Biometric/passcode auth is not available on this device.',
+        );
       }
 
       final success = await _localAuth.authenticate(
@@ -688,7 +750,9 @@ class _StudentPageState extends State<StudentPage> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_friendlyError(error))));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_friendlyError(error))));
     }
   }
 
@@ -726,9 +790,12 @@ class _StudentPageState extends State<StudentPage> {
             const SizedBox(height: 8),
             Text('Latest RSSI: ${_latestRssi ?? '-'}'),
             Text('Scanning: ${_scanning ? 'ON' : 'OFF'}'),
+            if (_scanError != null) Text('Scan status: $_scanError'),
             if (!_blePermissionsGranted)
               const Text('Scanning blocked: enable Nearby devices permission.'),
-            Text('Finalization: ${_finalizationOpen ? 'OPEN' : 'WAITING FOR TEACHER'}'),
+            Text(
+              'Finalization: ${_finalizationOpen ? 'OPEN' : 'WAITING FOR TEACHER'}',
+            ),
             const SizedBox(height: 16),
             FilledButton(
               onPressed: _finalizationOpen ? _finalizeWithBiometric : null,
@@ -744,17 +811,23 @@ class _StudentPageState extends State<StudentPage> {
                 if (!permsOk) {
                   setState(() {
                     _blePermissionsGranted = false;
+                    _scanError = 'Nearby devices permission denied.';
                   });
                   if (!context.mounted) {
                     return;
                   }
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Grant Nearby devices permission and retry.')),
+                    const SnackBar(
+                      content: Text(
+                        'Grant Nearby devices permission and retry.',
+                      ),
+                    ),
                   );
                   return;
                 }
                 setState(() {
                   _blePermissionsGranted = true;
+                  _scanError = null;
                 });
                 await _loadActiveSession();
                 await _startScan();
@@ -830,7 +903,10 @@ class ApiClient {
     return List<dynamic>.from(response.data as List);
   }
 
-  Future<Map<String, dynamic>> _authedPost(String path, Map<String, dynamic> data) async {
+  Future<Map<String, dynamic>> _authedPost(
+    String path,
+    Map<String, dynamic> data,
+  ) async {
     final token = await _token();
     final response = await _dio.post(
       path,
@@ -846,19 +922,25 @@ class ApiClient {
     required String password,
     required AppRole role,
   }) async {
-    await _dio.post('/auth/register', data: {
-      'full_name': fullName,
-      'role': role.name,
-      'identifier': identifier,
-      'password': password,
-    });
+    await _dio.post(
+      '/auth/register',
+      data: {
+        'full_name': fullName,
+        'role': role.name,
+        'identifier': identifier,
+        'password': password,
+      },
+    );
   }
 
-  Future<String> login({required String identifier, required String password}) async {
-    final response = await _dio.post('/auth/login', data: {
-      'identifier': identifier,
-      'password': password,
-    });
+  Future<String> login({
+    required String identifier,
+    required String password,
+  }) async {
+    final response = await _dio.post(
+      '/auth/login',
+      data: {'identifier': identifier, 'password': password},
+    );
     final json = Map<String, dynamic>.from(response.data as Map);
     return json['access_token'] as String;
   }
@@ -973,5 +1055,7 @@ String _normalizeBaseUrl(String input) {
     throw Exception('Enter a valid server URL.');
   }
 
-  return withScheme.endsWith('/') ? withScheme.substring(0, withScheme.length - 1) : withScheme;
+  return withScheme.endsWith('/')
+      ? withScheme.substring(0, withScheme.length - 1)
+      : withScheme;
 }
