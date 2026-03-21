@@ -266,6 +266,12 @@ class _TeacherPageState extends State<TeacherPage> {
   Map<String, dynamic>? _summary;
 
   @override
+  void initState() {
+    super.initState();
+    _loadActiveSession();
+  }
+
+  @override
   void dispose() {
     _subjectCtrl.dispose();
     _blePeripheral.stop();
@@ -313,9 +319,19 @@ class _TeacherPageState extends State<TeacherPage> {
   }
 
   Future<void> _endSession() async {
-    final sessionId = _sessionId;
+    var sessionId = _sessionId;
     if (sessionId == null) {
-      return;
+      try {
+        final active = await widget.api.getActiveSession();
+        sessionId = active['id'] as String;
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No active session to end.')),
+          );
+        }
+        return;
+      }
     }
 
     setState(() {
@@ -376,6 +392,19 @@ class _TeacherPageState extends State<TeacherPage> {
     } catch (_) {}
   }
 
+  Future<void> _loadActiveSession() async {
+    try {
+      final session = await widget.api.getActiveSession();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _sessionId = session['id'] as String;
+        _token = session['token'] as String;
+      });
+    } catch (_) {}
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -396,7 +425,7 @@ class _TeacherPageState extends State<TeacherPage> {
             ),
             const SizedBox(height: 8),
             FilledButton.tonal(
-              onPressed: _loading || _sessionId == null ? null : _endSession,
+              onPressed: _loading ? null : _endSession,
               child: const Text('End Session'),
             ),
             const SizedBox(height: 8),
@@ -416,6 +445,11 @@ class _TeacherPageState extends State<TeacherPage> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: _loadActiveSession,
+              child: const Text('Recover Active Session'),
             ),
             const SizedBox(height: 12),
             Text('Session ID: ${_sessionId ?? '-'}'),
@@ -568,7 +602,7 @@ class _StudentPageState extends State<StudentPage> {
 
       final success = await _localAuth.authenticate(
         localizedReason: 'Authenticate to finalize attendance',
-        persistAcrossBackgrounding: true,
+        biometricOnly: false,
       );
       if (!success) {
         return;
