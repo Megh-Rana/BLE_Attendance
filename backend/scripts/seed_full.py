@@ -1,0 +1,354 @@
+"""
+Seed: admin, CE FY teachers (from timetable images), CE Div1+Div2 slots, students 25CE001-25CE142.
+Timetable source: CSPIT CE B.Tech Sem II 2025-26 (pages 2 & 3 of tt.pdf)
+"""
+import os, sys
+ROOT = os.path.dirname(os.path.dirname(__file__))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+from sqlalchemy import select, text
+from app.auth import hash_password
+from app.database import Base, SessionLocal, engine
+from app.main import _run_migrations
+from app.models import (
+    Batch, Branch, Division, DivisionStudent, ScheduleSlot, Semester,
+    Subject, TeacherAssignment, User, UserRole,
+)
+
+DEFAULT_PASS = "Pass@123"
+
+BRANCHES = [
+    ("CE", "Computer Engineering"), ("CS", "Computer Science"),
+    ("IT", "Information Technology"), ("AIML", "AI & Machine Learning"),
+    ("ME", "Mechanical Engineering"), ("CL", "Chemical Engineering"),
+    ("EC", "Electronics & Communication"), ("EE", "Electrical Engineering"),
+]
+
+# (short_code, full_name, teacher_id)
+# Extracted from CE Div1 + Div2 legend boxes in timetable images
+CE_TEACHERS = [
+    ("RBC", "Dr. Rajendra Chauhan",  "T001"),
+    ("YFP", "Dr. Yogeshwari Patel",  "T002"),
+    ("APC", "Dr. Aayushi Chaudhari", "T003"),
+    ("MJP", "Mayuri Popat",          "T004"),
+    ("KJM", "Krunal Maheriya",       "T005"),
+    ("BSS", "Bijal Suthar",          "T006"),
+    ("TRP", "Trusha Patel",          "T007"),
+    ("SRC", "Sagar Chokshi",         "T008"),
+    ("AVP", "Axat Patel",            "T009"),
+    ("GAP", "Gaurang Patel",         "T010"),
+    ("APP", "Anand Patel",           "T011"),
+    ("DYP", "Dipali Patel",          "T012"),
+    ("SRP", "Dr. Sachin Patel",      "T013"),
+    ("MNS", "Dr. Manan Shah",        "T014"),
+    ("RNP", "Ronak Patel",           "T015"),
+    ("AYT", "Ashif Thakor",          "T016"),
+    ("NAP", "Nirpex Patel",          "T017"),
+    ("PCP", "Pinal Patel",           "T018"),
+    ("AK",  "Amit Kumar",            "T019"),
+    ("PMP", "Dr. Pratik Pataniya",   "T020"),
+    ("SB",  "Dr. Sanjay Bhakhar",    "T021"),
+    ("GKR", "Gargi Ray",             "T022"),
+]
+
+CE_SUBJECTS = [
+    ("MSUD102",     "Engineering Mathematics-II",           "lecture"),
+    ("CEUC102",     "Object Oriented Programming with C++", "lecture"),
+    ("CEUC102_LAB", "OOP with C++ Lab",                    "lab"),
+    ("MEUD101",     "Elements of Engineering",              "lab"),
+    ("CLUV101",     "Environmental Sciences",               "lecture"),
+    ("PSUD102",     "Engineering Physics-II",               "lecture"),
+    ("CSUC101",     "Digital Electronics",                  "lecture"),
+    ("CSUC101_LAB", "Digital Electronics Lab",              "lab"),
+]
+
+# ── CE Div1 schedule slots ────────────────────────────────────────────────────
+# Consecutive same-teacher slots are merged into one longer slot.
+# Format: (teacher_short, subject_code, batch_label_or_None, day 0=Mon, time_start, time_end, room)
+CE_DIV1_SLOTS = [
+    # MON — MEUD101 lab (2hr blocks)
+    ("AVP", "MEUD101", "A1", 0, "09:10", "11:10", "323-C"),
+    ("APP", "MEUD101", "B1", 0, "09:10", "11:10", "326"),
+    ("SRC", "MEUD101", "C1", 0, "09:10", "11:10", "514"),
+    ("DYP", "MEUD101", "A1", 0, "10:10", "11:10", "323-C"),   # DYP replaces AVP at 10:10
+    ("NAP", "MEUD101", "B1", 0, "10:10", "11:10", "326"),
+    ("GKR", "MEUD101", "C1", 0, "10:10", "11:10", "514"),
+    # MON — lectures
+    ("YFP", "MSUD102", None, 0, "12:10", "13:10", "310"),
+    ("APC", "CEUC102", None, 0, "13:10", "14:10", "310"),
+    # MON — CEUC102 lab (2hr)
+    ("MJP", "CEUC102_LAB", "A1", 0, "14:20", "16:20", "316"),
+    ("APC", "CEUC102_LAB", "B1", 0, "14:20", "16:20", "317"),
+    ("BSS", "CEUC102_LAB", "C1", 0, "14:20", "16:20", "317"),
+
+    # TUE
+    ("SRC", "MEUD101", None, 1, "09:10", "10:10", "310"),
+    ("RNP", "CSUC101", None, 1, "10:10", "11:10", "310"),
+    ("YFP", "MSUD102", None, 1, "12:10", "13:10", "310"),
+    ("GKR", "MEUD101", None, 1, "13:10", "14:10", "310"),
+    ("DYP", "CLUV101", None, 1, "14:20", "15:20", "310"),
+
+    # WED
+    ("SRC", "MEUD101", None, 2, "09:10", "10:10", "310"),
+    ("RBC", "MSUD102", None, 2, "10:10", "11:10", "310"),
+    ("DYP", "CLUV101", None, 2, "12:10", "13:10", "310"),
+    ("TRP", "CEUC102", None, 2, "13:10", "14:10", "310"),
+    ("YFP", "MSUD102", None, 2, "14:20", "15:20", "310"),
+    ("RNP", "CSUC101", None, 2, "15:20", "16:20", "310"),
+
+    # THU
+    ("RBC", "MSUD102", None, 3, "09:10", "10:10", "310"),
+    ("GAP", "MEUD101", None, 3, "10:10", "11:10", "310"),
+    # THU — split batches (2hr)
+    ("SRP", "PSUD102", "B1", 3, "12:10", "14:10", "DEPSTAR-321"),
+    ("RNP", "CSUC101", "C1", 3, "12:10", "14:10", "219"),
+    ("AYT", "CSUC101", "A1", 3, "14:20", "16:20", "323B"),
+
+    # FRI — split batches (2hr)
+    ("SB",  "PSUD102", "A1", 4, "09:10", "11:10", "308"),
+    ("RNP", "CSUC101", "B1", 4, "09:10", "11:10", "319"),
+    ("TRP", "CEUC102", None, 4, "12:10", "13:10", "310"),
+    ("MNS", "PSUD102",  "C1", 4, "14:20", "16:20", "321"),
+    ("MJP", "CEUC102_LAB", "A1", 4, "14:20", "16:20", "316"),
+    ("KJM", "CEUC102_LAB", "B1", 4, "14:20", "16:20", "317"),
+    ("TRP", "CEUC102_LAB", "C1", 4, "14:20", "16:20", "317"),
+
+    # SAT
+    ("RBC", "MSUD102", None, 5, "09:10", "11:10", "319"),
+]
+
+# ── CE Div2 schedule slots ────────────────────────────────────────────────────
+CE_DIV2_SLOTS = [
+    # MON
+    ("MJP", "CEUC102", None, 0, "09:10", "10:10", "310"),
+    ("GAP", "MEUD101", "A2", 0, "10:10", "11:10", "310"),
+    ("DYP", "MEUD101", None, 0, "12:10", "13:10", "304"),
+    ("YFP", "MSUD102", None, 0, "13:10", "14:10", "304"),
+    ("PMP", "PSUD102", "A2", 0, "14:20", "16:20", "321"),
+    ("AYT", "CSUC101", "B2", 0, "14:20", "16:20", "323B"),
+
+    # TUE — CEUC102 lab (2hr)
+    ("MJP", "CEUC102_LAB", "A2", 1, "09:10", "11:10", "316"),
+    ("APC", "CEUC102_LAB", "B2", 1, "09:10", "11:10", "317"),
+    ("TRP", "CEUC102_LAB", "C2", 1, "09:10", "11:10", "317"),
+    ("RBC", "MSUD102", None, 1, "12:10", "13:10", "303"),
+    ("YFP", "MSUD102", None, 1, "13:10", "14:10", "313"),
+    ("AK",  "CLUV101", None, 1, "14:20", "16:20", "304"),
+
+    # WED — split batches (2hr)
+    ("RNP", "CSUC101", "A2", 2, "09:10", "11:10", "617-A"),
+    ("SRP", "PSUD102", "B2", 2, "09:10", "11:10", "Depstar-321"),
+    ("PMP", "PSUD102", "C2", 2, "09:10", "11:10", "321"),
+    ("RBC", "MSUD102", None, 2, "12:10", "13:10", "303"),
+    ("AYT", "CSUC101", None, 2, "13:10", "14:10", "303"),
+    ("YFP", "MSUD102", None, 2, "14:20", "15:20", "303"),
+    ("KJM", "CEUC102", "A2", 2, "15:20", "16:20", "303"),
+
+    # THU
+    ("AVP", "MEUD101", "A2", 3, "09:10", "10:10", "323-C"),
+    ("AVP", "MEUD101", "B2", 3, "09:10", "10:10", "326"),
+    ("APP", "MEUD101", "C2", 3, "09:10", "10:10", "514"),
+    ("PCP", "MEUD101", "A2", 3, "10:10", "11:10", "323-C"),
+    ("NAP", "MEUD101", "B2", 3, "10:10", "11:10", "326"),
+    ("DYP", "MEUD101", "C2", 3, "10:10", "11:10", "514"),
+    ("AYT", "CSUC101", None, 3, "12:10", "13:10", "303"),
+    ("RBC", "MSUD102", None, 3, "12:10", "13:10", "304"),
+    ("SRC", "MEUD101", None, 3, "13:10", "14:10", "303"),
+
+    # FRI
+    ("AYT", "CSUC101", "C2", 4, "09:10", "11:10", "323B"),
+    ("RBC", "MSUD102", None, 4, "12:10", "13:10", "314"),
+    ("SRC", "MEUD101", None, 4, "14:20", "15:20", "303"),
+    ("KJM", "CEUC102_LAB", "A2", 4, "14:20", "16:20", "316"),
+    ("APC", "CEUC102_LAB", "B2", 4, "14:20", "16:20", "317"),
+    ("TRP", "CEUC102_LAB", "C2", 4, "14:20", "16:20", "317"),
+    ("APC", "CEUC102", None, 4, "15:20", "16:20", "303"),
+
+    # SAT
+    ("RBC", "MSUD102", None, 5, "09:10", "11:10", "304"),
+]
+
+
+def get_or_create(db, model, defaults=None, **kwargs):
+    obj = db.scalar(select(model).filter_by(**kwargs))
+    if obj:
+        return obj, False
+    obj = model(**{**kwargs, **(defaults or {})})
+    db.add(obj)
+    db.flush()
+    return obj, True
+
+
+def main():
+    Base.metadata.create_all(bind=engine)
+    _run_migrations(engine)  # handles ALTER TYPE + column migrations safely
+
+    db = SessionLocal()
+    try:
+        # Super admin
+        if not db.scalar(select(User).where(User.admin_id == "ADMIN001")):
+            db.add(User(full_name="Super Admin", role=UserRole.admin, admin_id="ADMIN001",
+                        password_hash=hash_password(DEFAULT_PASS), is_super_admin=True))
+            print("Created super admin: ADMIN001")
+
+        # ── T000: test teacher with 24/7 schedule ──────────────────────────
+        t000 = db.scalar(select(User).where(User.teacher_id == "T000"))
+        if not t000:
+            t000 = User(full_name="Test Teacher", role=UserRole.teacher,
+                        teacher_id="T000", password_hash=hash_password(DEFAULT_PASS))
+            db.add(t000)
+            db.flush()
+            print("Created test teacher: T000")
+
+        # Teachers — update name if exists, create if not
+        teacher_map = {}
+        for short, name, tid in CE_TEACHERS:
+            existing = db.scalar(select(User).where(User.teacher_id == tid))
+            if existing:
+                existing.full_name = name  # fix name if wrong
+                teacher_map[short] = existing
+            else:
+                user = User(full_name=name, role=UserRole.teacher,
+                            teacher_id=tid, password_hash=hash_password(DEFAULT_PASS))
+                db.add(user)
+                db.flush()
+                teacher_map[short] = user
+                print(f"Created teacher: {tid} {name}")
+
+        db.flush()
+
+        # Branches
+        branch_map = {}
+        for code, name in BRANCHES:
+            b, _ = get_or_create(db, Branch, code=code, defaults=dict(name=name))
+            branch_map[code] = b
+
+        # Semester
+        sem, _ = get_or_create(db, Semester, name="Sem II 2025-26",
+                               defaults=dict(start_date="2026-01-19", end_date="2026-05-31",
+                                             is_active=True))
+
+        # CE FY Divisions
+        ce = branch_map["CE"]
+        div1, _ = get_or_create(db, Division, branch_id=ce.id, year=1, div_number=1,
+                                defaults=dict(label="CE-FY-Div1"))
+        div2, _ = get_or_create(db, Division, branch_id=ce.id, year=1, div_number=2,
+                                defaults=dict(label="CE-FY-Div2"))
+
+        batch_map_d1 = {}
+        for lbl in ["A1", "B1", "C1"]:
+            b, _ = get_or_create(db, Batch, division_id=div1.id, label=lbl)
+            batch_map_d1[lbl] = b
+
+        batch_map_d2 = {}
+        for lbl in ["A2", "B2", "C2"]:
+            b, _ = get_or_create(db, Batch, division_id=div2.id, label=lbl)
+            batch_map_d2[lbl] = b
+
+        # Subjects
+        subj_map = {}
+        for code, name, stype in CE_SUBJECTS:
+            s, _ = get_or_create(db, Subject, code=code,
+                                 defaults=dict(name=name, subject_type=stype))
+            subj_map[code] = s
+
+        # Build assignment cache
+        assign_cache = {}
+
+        def get_assign(short, subj_code, div, batch_label):
+            teacher = teacher_map.get(short)
+            subj = subj_map.get(subj_code)
+            if not teacher or not subj:
+                print(f"  WARN: missing teacher={short} or subj={subj_code}")
+                return None
+            bmap = batch_map_d1 if div.id == div1.id else batch_map_d2
+            batch = bmap.get(batch_label) if batch_label else None
+            key = (teacher.id, subj.id, div.id, batch.id if batch else None)
+            if key in assign_cache:
+                return assign_cache[key]
+            a, _ = get_or_create(db, TeacherAssignment,
+                                  teacher_user_id=teacher.id, subject_id=subj.id,
+                                  division_id=div.id,
+                                  batch_id=batch.id if batch else None)
+            assign_cache[key] = a
+            return a
+
+        # Wipe ALL assignments and slots cleanly before rebuilding
+        for s in db.execute(select(ScheduleSlot)).scalars().all():
+            db.delete(s)
+        db.flush()
+        # Null out sessions.assignment_id so the FK doesn't block deletion
+        from app.models import Session as LectureSession
+        db.execute(text("UPDATE sessions SET assignment_id = NULL"))
+        db.flush()
+        for a in db.execute(select(TeacherAssignment)).scalars().all():
+            db.delete(a)
+        db.flush()
+        assign_cache.clear()
+
+        # Add Div1 slots
+        for (short, scode, blbl, day, ts, te, room) in CE_DIV1_SLOTS:
+            a = get_assign(short, scode, div1, blbl)
+            if a:
+                db.add(ScheduleSlot(assignment_id=a.id, semester_id=sem.id,
+                                    day_of_week=day, time_start=ts, time_end=te, room=room))
+
+        # Add Div2 slots
+        for (short, scode, blbl, day, ts, te, room) in CE_DIV2_SLOTS:
+            a = get_assign(short, scode, div2, blbl)
+            if a:
+                db.add(ScheduleSlot(assignment_id=a.id, semester_id=sem.id,
+                                    day_of_week=day, time_start=ts, time_end=te, room=room))
+
+        db.flush()
+
+        # ── T000: 24/7 test schedule (Mon–Sun, 00:00–23:59) ───────────────
+        t000 = db.scalar(select(User).where(User.teacher_id == "T000"))
+        if t000:
+            test_subj, _ = get_or_create(db, Subject, code="TEST001",
+                                         defaults=dict(name="Test Subject", subject_type="lecture"))
+            test_assign, _ = get_or_create(db, TeacherAssignment,
+                                           teacher_user_id=t000.id, subject_id=test_subj.id,
+                                           division_id=div1.id, batch_id=None)
+            for day in range(7):  # 0=Mon … 6=Sun
+                db.add(ScheduleSlot(assignment_id=test_assign.id, semester_id=sem.id,
+                                    day_of_week=day, time_start="00:00", time_end="23:59",
+                                    room="TEST"))
+            db.flush()
+            print("T000 24/7 schedule created")
+
+        # Students 25CE001-25CE142
+        created_count = 0
+        for i in range(1, 143):
+            sid = f"25CE{i:03d}"
+            if db.scalar(select(User).where(User.student_id == sid)):
+                continue
+            student = User(full_name=f"Student {sid}", role=UserRole.student,
+                           student_id=sid, password_hash=hash_password(DEFAULT_PASS))
+            db.add(student)
+            db.flush()
+            if i <= 71:
+                div = div1
+                batch = batch_map_d1["A1"] if i <= 24 else (batch_map_d1["B1"] if i <= 48 else batch_map_d1["C1"])
+            else:
+                div = div2
+                j = i - 71
+                batch = batch_map_d2["A2"] if j <= 24 else (batch_map_d2["B2"] if j <= 48 else batch_map_d2["C2"])
+            if not db.scalar(select(DivisionStudent).where(
+                DivisionStudent.student_user_id == student.id,
+                DivisionStudent.division_id == div.id
+            )):
+                db.add(DivisionStudent(student_user_id=student.id,
+                                       division_id=div.id, batch_id=batch.id))
+            created_count += 1
+
+        db.commit()
+        print(f"Seeded {created_count} students")
+        print("Done.")
+    finally:
+        db.close()
+
+
+if __name__ == "__main__":
+    main()
