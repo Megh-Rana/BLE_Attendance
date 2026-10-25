@@ -1,0 +1,119 @@
+import { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
+import { getTodaySchedule, getMyAssignments, startSession, endSession } from '../../api/endpoints'
+import { Clock, MapPin, Users, ArrowRight, FlaskConical, StopCircle } from 'lucide-react'
+
+const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
+
+export default function TeacherDashboard() {
+  const { data: slots = [], isLoading } = useQuery({ queryKey: ['today-schedule'], queryFn: getTodaySchedule, refetchInterval: 30_000 })
+  const { data: assignments = [] } = useQuery({ queryKey: ['my-assignments'], queryFn: getMyAssignments, refetchInterval: 60_000 })
+  const [activeTestSession, setActiveTestSession] = useState<{ id: string; subject: string } | null>(null)
+  const [testError, setTestError] = useState<string | null>(null)
+  const qc = useQueryClient()
+
+  const today = new Date()
+  const dayIdx = today.getDay() === 0 ? 6 : today.getDay() - 1
+  const dateStr = today.toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' })
+
+  const startMut = useMutation({
+    mutationFn: (assignmentId: number) =>
+      startSession({ subject: 'Test Session', assignment_id: assignmentId }),
+    onSuccess: (data) => {
+      setActiveTestSession({ id: data.id, subject: data.subject })
+      setTestError(null)
+      qc.invalidateQueries({ queryKey: ['sessions'] })
+    },
+    onError: (e: any) => setTestError(e?.response?.data?.detail ?? 'Failed to start session'),
+  })
+
+  const endMut = useMutation({
+    mutationFn: (sessionId: string) => endSession(sessionId),
+    onSuccess: () => {
+      setActiveTestSession(null)
+      setTestError(null)
+      qc.invalidateQueries({ queryKey: ['sessions'] })
+    },
+    onError: (e: any) => setTestError(e?.response?.data?.detail ?? 'Failed to end session'),
+  })
+
+  // Pick first available assignment for the test session
+  const firstAssignment = assignments[0]
+
+  return (
+    <div className="p-8 max-w-5xl mx-auto">
+      <div className="mb-8 flex items-start justify-between flex-wrap gap-4">
+        <div>
+          <h1 className="text-3xl font-black text-zinc-900">Today's Schedule</h1>
+          <p className="text-zinc-500 text-base mt-1">{DAYS[dayIdx]}, {dateStr}</p>
+        </div>
+
+        {/* ── Test session button ── */}
+        <div className="flex flex-col items-end gap-1">
+          {activeTestSession ? (
+            <button
+              onClick={() => endMut.mutate(activeTestSession.id)}
+              disabled={endMut.isPending}
+              className="flex items-center gap-2 bg-red-50 border-2 border-red-500 text-red-700 font-bold px-4 py-2 rounded-xl shadow-[2px_2px_0_0_#ef4444] hover:shadow-none hover:translate-x-0.5 hover:translate-y-0.5 transition-all disabled:opacity-50">
+              <StopCircle size={16} />
+              {endMut.isPending ? 'Ending…' : `End Test Session`}
+            </button>
+          ) : (
+            <button
+              onClick={() => firstAssignment && startMut.mutate(firstAssignment.id)}
+              disabled={startMut.isPending || !firstAssignment}
+              title={!firstAssignment ? 'No assignments found' : 'Start a quick test session'}
+              className="flex items-center gap-2 bg-amber-50 border-2 border-amber-500 text-amber-800 font-bold px-4 py-2 rounded-xl shadow-[2px_2px_0_0_#f59e0b] hover:shadow-none hover:translate-x-0.5 hover:translate-y-0.5 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+              <FlaskConical size={16} />
+              {startMut.isPending ? 'Starting…' : 'Start Test Session'}
+            </button>
+          )}
+          {activeTestSession && (
+            <span className="text-xs text-green-700 font-semibold">● Active: {activeTestSession.subject}</span>
+          )}
+          {testError && <span className="text-xs text-red-600">{testError}</span>}
+        </div>
+      </div>
+
+      {isLoading && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          {[1,2,3].map(i => <div key={i} className="h-40 bg-zinc-200 rounded-xl border-2 border-zinc-300 animate-pulse" />)}
+        </div>
+      )}
+
+      {!isLoading && slots.length === 0 && (
+        <div className="border-2 border-dashed border-zinc-300 rounded-xl py-20 text-center text-zinc-400">
+          <Clock size={44} className="mx-auto mb-4 opacity-40" />
+          <p className="font-semibold text-lg">No classes scheduled today</p>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        {slots.map((slot: any) => (
+          <Link key={slot.id} to={`/teacher/sessions?assignment_id=${slot.assignment_id}`}
+            className="group bg-zinc-50 border-2 border-black rounded-xl p-5 shadow-[4px_4px_0_0_#000] hover:shadow-[2px_2px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 transition-all">
+            <div className="flex items-start justify-between mb-4">
+              <span className="bg-indigo-100 border border-black text-indigo-800 text-sm font-bold px-3 py-1 rounded-lg">
+                {slot.time_start} – {slot.time_end}
+              </span>
+              <ArrowRight size={18} className="text-zinc-300 group-hover:text-black transition-colors mt-0.5" />
+            </div>
+            <div className="font-black text-zinc-900 text-lg leading-tight">{slot.subject_name}</div>
+            <div className="font-mono text-sm text-zinc-400 mt-1">{slot.subject_code}</div>
+            <div className="flex flex-wrap gap-2 mt-4">
+              <span className="flex items-center gap-1.5 text-sm text-zinc-600 bg-zinc-100 px-2.5 py-1 rounded-lg border border-zinc-200">
+                <Users size={13} />{slot.division_label}{slot.batch_label ? ` / ${slot.batch_label}` : ''}
+              </span>
+              {slot.room && (
+                <span className="flex items-center gap-1.5 text-sm text-zinc-600 bg-zinc-100 px-2.5 py-1 rounded-lg border border-zinc-200">
+                  <MapPin size={13} />{slot.room}
+                </span>
+              )}
+            </div>
+          </Link>
+        ))}
+      </div>
+    </div>
+  )
+}

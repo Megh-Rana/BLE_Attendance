@@ -32,10 +32,9 @@ def upsert_attendance(
     session_id: str,
     student_user_id: str,
     biometric_verified: bool,
-    threshold: float = 0.6,
+    threshold: float = 0.75,
 ) -> Attendance:
     ratio = compute_presence_ratio(db, session_id, student_user_id)
-    is_present = ratio >= threshold
 
     stmt = select(Attendance).where(
         and_(Attendance.session_id == session_id, Attendance.student_user_id == student_user_id)
@@ -43,6 +42,11 @@ def upsert_attendance(
     row = db.scalar(stmt)
 
     if row is None:
+        # Both BLE proximity AND biometric verification are required.
+        # A student is only marked present if they have sufficient
+        # detection ratio AND have completed biometric verification.
+        is_present = (ratio >= threshold) and biometric_verified
+
         row = Attendance(
             session_id=session_id,
             student_user_id=student_user_id,
@@ -53,10 +57,16 @@ def upsert_attendance(
         )
         db.add(row)
     else:
-        row.presence_ratio = ratio
-        row.is_present = is_present
+        # Always record biometric verification first
         row.biometric_verified = biometric_verified
         row.finalized_at = datetime.utcnow() if biometric_verified else row.finalized_at
+        # Update presence ratio from live detections if available
+        if ratio > 0:
+            row.presence_ratio = ratio
+        # Both BLE proximity AND biometric are required for present.
+        # If the teacher already set is_present (via override or
+        # batch-submit), that will be handled by the override flag.
+        row.is_present = (row.presence_ratio >= threshold) and row.biometric_verified
 
     db.commit()
     db.refresh(row)
@@ -67,7 +77,7 @@ def build_attendance_if_missing(
     db: Session,
     session_id: str,
     student_user_id: str,
-    threshold: float = 0.6,
+    threshold: float = 0.75,
 ) -> Attendance:
     stmt = select(Attendance).where(
         and_(Attendance.session_id == session_id, Attendance.student_user_id == student_user_id)
@@ -81,7 +91,7 @@ def build_attendance_if_missing(
         session_id=session_id,
         student_user_id=student_user_id,
         presence_ratio=ratio,
-        is_present=ratio >= threshold,
+        is_present=False,  # biometric not done → always absent
         biometric_verified=False,
     )
     db.add(row)
